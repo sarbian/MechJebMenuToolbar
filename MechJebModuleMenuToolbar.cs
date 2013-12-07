@@ -13,22 +13,35 @@ namespace MuMech
     public class MechJebModuleMenuToolbar : DisplayModule
     {
 
-        public MechJebModuleMenuToolbar(MechJebCore core)
-            : base(core)
+        public MechJebModuleMenuToolbar(MechJebCore core) : base(core)
         {
-            priority = -1000;
-            enabled = true;
+            showInFlight = true;
+            showInEditor = true;
             hidden = true;
-            showInFlight = false;
-            showInEditor = false;
+            enabled = true;
         }
 
-        Dictionary<DisplayModule, IButton> toolbarButtons;
+        private IButton mjMenuButton;
+
+        public Dictionary<DisplayModule, IButton> toolbarButtons;
 
         public override void OnStart(PartModule.StartState state)
         {
-            core.GetComputerModule<MechJebModuleMenu>().enabled = false;
+            hidden = true;
+
             toolbarButtons = new Dictionary<DisplayModule, IButton>();
+                                   
+            core.GetComputerModule<MechJebModuleMenu>().hideButton = true;
+
+            // The main MJ Button
+            mjMenuButton = ToolbarManager.Instance.add("MechJeb", "0_MechJebMenu");
+            mjMenuButton.TexturePath = "MechJeb2/Plugins/Icons/MJ2";
+            mjMenuButton.ToolTip = "MechJeb Main Menu";
+            mjMenuButton.OnClick += (b) =>
+            {
+                MechJebModuleMenu mjMenu = vessel.GetMasterMechJeb().GetComputerModule<MechJebModuleMenu>();
+                mjMenu.ShowHideWindow();
+            };
         }
 
         public override void OnModuleDisabled()
@@ -38,35 +51,50 @@ namespace MuMech
 
         public override void OnDestroy()
         {
-            print("MechJebModuleMenuToolbar OnDestroy");
-            if (toolbarButtons!=null)
+            if (toolbarButtons != null)
                 foreach (IButton b in toolbarButtons.Values)
-                    b.Visible = false;
+                    b.Destroy();
+            if (mjMenuButton != null)
+                mjMenuButton.Destroy();
+        }
+
+        public static string CleanName(String name)
+        {
+            return name.Replace('.', '_').Replace(' ', '_').Replace(':', '_').Replace('/', '_');
         }
 
         public override void DrawGUI(bool inEditor)
         {
-            // Remove deleted button
-            if (toolbarButtons.Count > core.GetComputerModules<DisplayModule>().Count)
-                foreach (DisplayModule d in toolbarButtons.Keys)
-                    if (!core.GetComputerModules<DisplayModule>().Contains(d))
-                        // here we should have code to remove button for deleted MechJebModuleCustomInfoWindow
-                        toolbarButtons[d].Visible=false;
+            // Remove deleted button (MechJebModuleCustomInfoWindow)
+            foreach (DisplayModule d in toolbarButtons.Keys)
+                if (!core.GetComputerModules<DisplayModule>().Contains(d))
+                    toolbarButtons[d].Destroy();
 
             // No real point to keep the OrderBy for now, but this may get usefull later and is not much overhead
+            // Instanciate all the button
             foreach (DisplayModule module in core.GetComputerModules<DisplayModule>().OrderBy(m => m, DisplayOrder.instance))
             {
-                if (!module.hidden && module.showInCurrentScene)
+                String name = CleanName(module.GetName());                
+                //if (!module.hidden && module.showInCurrentScene)
+                if (!module.hidden)
                 {
-                    IButton button;
+                    IButton button;                                        
+                    
                     if (!toolbarButtons.ContainsKey(module))
                     {
-                        String name = module.GetName().Replace('.', '_').Replace(' ', '_').Replace(':', '_').Replace('/', '_');
                         button = ToolbarManager.Instance.add("MechJeb", name);
                         print("MechJebModuleMenuToolbar adding Button: " + name + " for " + module.GetType().Name);
                         toolbarButtons[module] = button;
-                        button.Text = module.GetName();
-                        button.Visibility = new GameScenesVisibility(GameScenes.EDITOR, GameScenes.SPH, GameScenes.FLIGHT);
+                        button.ToolTip = "MechJeb " + module.GetName();
+                        String TexturePath = "MechJeb2/Plugins/Icons/" + name;
+                        if (GameDatabase.Instance.GetTexture(TexturePath, false) == null)
+                        { 
+                            TexturePath = "MechJeb2/Plugins/Icons/QMark";
+                            print("[MechJebModuleMenuToolbar] No icon for " + name);
+                        }
+                        button.TexturePath = TexturePath;
+                        button.Visibility = new MJButtonVisibility(module, vessel);
+                        button.Visible = module.useIcon;
                         button.OnClick += (b) =>
                         {
                             module.enabled = !module.enabled;
@@ -75,11 +103,10 @@ namespace MuMech
                     else
                         button = toolbarButtons[module];
 
-                    // Rajouter un test pour !module.hidden && module.showInCurrentScene
-                    // en utilisant le button5.Visibility = new GameScenesVisibility(GameScenes.EDITOR, GameScenes.SPH);
-                    // Avec uene version custom qui prend les 2 en compte
+                    if (button.Visible != module.useIcon)
+                        button.Visible = module.useIcon;
 
-                    button.Visible = !module.hidden && module.showInCurrentScene;
+                    // for now this does nothing since I don't have a separate set of icon for active / inactive.
 
                     if (button.Visible)
                     {
@@ -96,18 +123,33 @@ namespace MuMech
                         }
                         if (module is MechJebModuleWarpHelper && ((MechJebModuleWarpHelper)module).warping) active = true;
                         if (module is MechJebModuleThrustWindow && core.thrust.limiter != MechJebModuleThrustController.LimitMode.None) active = true;
-
-                        button.TextColor = active ? Color.green : Color.white;
+                        
+                        // TODO : CHANGE THE ICON 
+                        // button.TexturePath = 
                     }
                 }
-            }            
+            }                       
         }
 
-        public override string GetName()
+        public class MJButtonVisibility : IVisibility
         {
-            return "MechJebModuleMenuToolbar";
-        }
+            private Vessel vessel;
+            private DisplayModule module;
 
+            public bool Visible
+            {
+                get
+                {
+                    return module.useIcon && module.showInCurrentScene && (HighLogic.LoadedSceneIsEditor || vessel.isActiveVessel);
+                }
+            }
+
+            public MJButtonVisibility(DisplayModule module, Vessel vessel)
+            {
+                this.vessel = vessel;
+                this.module = module;
+            }
+        }
 
         class DisplayOrder : IComparer<DisplayModule>
         {
