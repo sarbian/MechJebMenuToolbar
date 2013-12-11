@@ -21,27 +21,19 @@ namespace MuMech
             enabled = true;
         }
 
-        private IButton mjMenuButton;
-
-        public Dictionary<DisplayModule, IButton> toolbarButtons;
-
+        private static IButton mjMenuButton;
+        private static Dictionary<DisplayModule, IButton> toolbarButtons;
+        private static List<MechJebCore> activeMJ;
+        private static Vessel lastVessel;
+                
         public override void OnStart(PartModule.StartState state)
         {
             hidden = true;
 
             toolbarButtons = new Dictionary<DisplayModule, IButton>();
-                                   
-            core.GetComputerModule<MechJebModuleMenu>().hideButton = true;
 
-            // The main MJ Button
-            mjMenuButton = ToolbarManager.Instance.add("MechJeb", "0_MechJebMenu");
-            mjMenuButton.TexturePath = "MechJeb2/Plugins/Icons/MJ2";
-            mjMenuButton.ToolTip = "MechJeb Main Menu";
-            mjMenuButton.OnClick += (b) =>
-            {
-                MechJebModuleMenu mjMenu = vessel.GetMasterMechJeb().GetComputerModule<MechJebModuleMenu>();
-                mjMenu.ShowHideWindow();
-            };
+            if (activeMJ == null)
+                activeMJ = new List<MechJebCore>();
         }
 
         public override void OnModuleDisabled()
@@ -51,11 +43,25 @@ namespace MuMech
 
         public override void OnDestroy()
         {
+            activeMJ.Remove(core);
+
+            if (activeMJ.Count == 0)
+                CleanUp();
+        }
+
+        private void CleanUp()
+        {
             if (toolbarButtons != null)
+            {
                 foreach (IButton b in toolbarButtons.Values)
                     b.Destroy();
+                toolbarButtons.Clear();
+            }
             if (mjMenuButton != null)
+            {
                 mjMenuButton.Destroy();
+                mjMenuButton = null;
+            }
         }
 
         public static string CleanName(String name)
@@ -63,12 +69,40 @@ namespace MuMech
             return name.Replace('.', '_').Replace(' ', '_').Replace(':', '_').Replace('/', '_');
         }
 
+
+        // DrawGUI is the only thing called by MechJebCore while in the editor
         public override void DrawGUI(bool inEditor)
         {
+            if (vessel != lastVessel)
+                CleanUp();
+
+            lastVessel = vessel;
+
+            core.GetComputerModule<MechJebModuleMenu>().hideButton = true;
+
+            if (mjMenuButton == null)
+            {
+                // The main MJ Button
+                MechJebModuleMenu mjMenu = vessel.GetMasterMechJeb().GetComputerModule<MechJebModuleMenu>();
+                activeMJ.Add(core);
+                mjMenu.useIcon = true; // just to be sure since users with v1 conf may have it set to false
+                mjMenuButton = ToolbarManager.Instance.add("MechJeb", "0_MechJebMenu");
+                mjMenuButton.TexturePath = "MechJeb2/Plugins/Icons/MJ2";                
+                mjMenuButton.ToolTip = "MechJeb Main Menu";
+                mjMenuButton.Visibility = new MJButtonVisibility(mjMenu, vessel);
+                mjMenuButton.OnClick += (b) =>
+                {
+                    FlightGlobals.ActiveVessel.GetMasterMechJeb().GetComputerModule<MechJebModuleMenu>().ShowHideWindow();
+                };
+            }
+
             // Remove deleted button (MechJebModuleCustomInfoWindow)
             foreach (DisplayModule d in toolbarButtons.Keys)
                 if (!core.GetComputerModules<DisplayModule>().Contains(d))
+                { 
                     toolbarButtons[d].Destroy();
+                    toolbarButtons.Remove(d);
+                }
 
             // No real point to keep the OrderBy for now, but this may get usefull later and is not much overhead
             // Instanciate all the button
@@ -83,7 +117,7 @@ namespace MuMech
                     if (!toolbarButtons.ContainsKey(module))
                     {
                         button = ToolbarManager.Instance.add("MechJeb", name);
-                        print("MechJebModuleMenuToolbar adding Button: " + name + " for " + module.GetType().Name);
+                        //print("MechJebModuleMenuToolbar adding Button: " + name + " for " + module.GetType().Name);
                         toolbarButtons[module] = button;
                         button.ToolTip = "MechJeb " + module.GetName();
                         String TexturePath = "MechJeb2/Plugins/Icons/" + name;
@@ -94,7 +128,6 @@ namespace MuMech
                         }
                         button.TexturePath = TexturePath;
                         button.Visibility = new MJButtonVisibility(module, vessel);
-                        button.Visible = module.useIcon;
                         button.OnClick += (b) =>
                         {
                             module.enabled = !module.enabled;
@@ -107,7 +140,6 @@ namespace MuMech
                         button.Visible = module.useIcon;
 
                     // for now this does nothing since I don't have a separate set of icon for active / inactive.
-
                     if (button.Visible)
                     {
                         // This display module is considered active if it uses any of these modules.
@@ -140,7 +172,7 @@ namespace MuMech
             {
                 get
                 {
-                    return module.useIcon && module.showInCurrentScene && (HighLogic.LoadedSceneIsEditor || vessel.isActiveVessel);
+                    return module.useIcon && module.showInCurrentScene && (HighLogic.LoadedSceneIsEditor || FlightGlobals.ActiveVessel.GetMasterMechJeb() != null);
                 }
             }
 
