@@ -99,9 +99,8 @@ namespace MuMech
             // Remove deleted button (MechJebModuleCustomInfoWindow)
             foreach (DisplayModule d in toolbarButtons.Keys)
                 if (!core.GetComputerModules<DisplayModule>().Contains(d))
-                { 
-                    toolbarButtons[d].Destroy();
-                    toolbarButtons.Remove(d);
+                {
+                    toolbarButtons[d].Visible = false;
                 }
 
             // No real point to keep the OrderBy for now, but this may get usefull later and is not much overhead
